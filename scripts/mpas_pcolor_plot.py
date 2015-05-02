@@ -11,15 +11,20 @@ import matplotlib.path as mpath
 import matplotlib.patches as mpatches
 import matplotlib.pyplot as plt
 from mpl_toolkits.basemap import Basemap
-
+import os
 def main():
-    mpas_file = '../output.nc'
-    ncfile = Dataset(mpas_file,'r')
 
-    pcolor_fill(ncfile,var='temperature_500hPa')
+    maindir = '../../../work'
+    diag_files = [f for f in os.listdir(maindir) if f.startswith('diag')]
+    #mpas_file = '../output.nc'
+    for fnum,f in enumerate(diag_files):
+        ncfile = Dataset('/'.join((maindir,f)),'r')
 
+        #pcolor_fill(ncfile,var='height_500hPa')
+        pcolor_fill(ncfile,var='height_500hPa', export=True)
+        ncfile.close()
 
-def pcolor_fill(ncfile, var, plevel=None):
+def pcolor_fill(ncfile, var, plevel=None, export=False):
     """ Function to do a pcolor-mesh-type plot of "var" on the optional level "plevel"
     """
     import cPickle
@@ -51,17 +56,17 @@ def pcolor_fill(ncfile, var, plevel=None):
         p = cPickle.load(patchfile)
         patchfile.close()
     except:
-        p = mpas_grid_to_patches(ncfile, m)
+        p = mpas_grid_to_patches(bmap=m)
 
 
 
     # Main deal with MPAS data is that u,v are defined on edges of cells while
     # other variables are based on the cells.  Need to sort out what our
     # defining unit is
-    if 'nEdges' in field_dims:
+    if 'nEdges' in field_dims or 'nVertices' in field_dims:
         # May just convert this back to a gridded contour plot
         # Not implemented for now
-        print "Edge data not implemented for pcolor-type plot"
+        print "Edge or vertex data not implemented for pcolor-type plot"
         exit(1)
 
 
@@ -86,10 +91,12 @@ def pcolor_fill(ncfile, var, plevel=None):
                 curfield = field[:, vert_lev]
             except:
                 curfield = field[:]
-
+        # Get the current time string
+        timestr = ''.join(list(ncfile.variables['xtime'][time])).strip()
+        print timestr
 
         # Now plot
-        fig = plt.figure(figsize=(12,9))
+        fig = plt.figure(figsize=(15,8))
         ax = plt.gca()
         # Set the plotting array of our patch collection to be curfield
         p.set_array(curfield)
@@ -107,17 +114,25 @@ def pcolor_fill(ncfile, var, plevel=None):
         ax.add_collection(p)
         m.drawcoastlines()
         plt.colorbar(p)
-        plt.title('%s   Time: %03d' % (var, time))
-        plt.show()
-        plt.close()
+        plt.title('%s   Time: %s' % (var, timestr))
+        if export:
+            plt.savefig('{:s}_{:s}.png'.format(var,timestr), bbox_inches='tight')
+            plt.close()
+        else:
+            plt.show()
+            plt.close()
 
 
 
-def mpas_grid_to_patches(mpasfile, bmap):
+def mpas_grid_to_patches(mpasfname='../output.nc', bmap=None):
     """ Function to create a collection of patches in Basemap plotting
     coordinates that define the cells of the MPAS domain """
     print "Defining Path Collection on MPAS Grid"
 
+    if not isinstance(mpasfname,Dataset):
+        mpasfile = Dataset(mpasfname,'r')
+    else:
+        mpasfile = mpasfname
 
     # Get the number of cells
     nCells = len(mpasfile.dimensions['nCells'])
@@ -143,8 +158,10 @@ def mpas_grid_to_patches(mpasfile, bmap):
         cell_verts -= 1
         #cell_verts = mpasfile.variables['indexToVertexID'][cell_vert_index]
         # Get the latitudes and longitudes of these and convert to degrees
-        vert_lats = mpasfile.variables['latVertex'][cell_verts] * 180./np.pi
-        vert_lons = mpasfile.variables['lonVertex'][cell_verts] * 180./np.pi
+        vert_lats = np.array([mpasfile.variables['latVertex'][d] * 180./np.pi for d in cell_verts])
+        vert_lons = np.array([mpasfile.variables['lonVertex'][d] * 180./np.pi for d in cell_verts])
+        #print cell_verts
+        #print vert_lons
         # Check for overlap of date line
         diff_lon = np.subtract(vert_lons, vert_lons[0])
         vert_lons[diff_lon > 180.0] = vert_lons[diff_lon > 180.0] - 360.0
@@ -154,7 +171,7 @@ def mpas_grid_to_patches(mpasfile, bmap):
         coords = np.vstack((vert_x, vert_y))
         # Now create a path for this
         # Codes follow same format
-        cell_codes = np.ones(nEdgesOnCell[c]+1) * mpath.Path.LINETO
+        cell_codes = np.ones(cell_verts.shape) * mpath.Path.LINETO
         cell_codes[0] = mpath.Path.MOVETO
         cell_codes[-1] = mpath.Path.CLOSEPOLY
         cell_path = mpath.Path(coords.T, codes=cell_codes, closed=True, readonly=True)
@@ -179,10 +196,10 @@ def make_map(mpasfile, lons, lats):
     """ Create a basemap object and projected coordinates for a global map """
     # MPAS cell lats and lons are projected using a cylindrical projection;
     # other projections are not recommended...
-    m = Basemap(projection='cyl',llcrnrlat=-90, urcrnrlat=90, llcrnrlon=0,
-                urcrnrlon=360, resolution='c')
-    #m = Basemap(projection='cyl',llcrnrlat=20, urcrnrlat=70, llcrnrlon=180,
-    #           urcrnrlon=340, resolution='c')
+    #m = Basemap(projection='cyl',llcrnrlat=-90, urcrnrlat=90, llcrnrlon=-180,
+    #           urcrnrlon=180, resolution='c')
+    m = Basemap(projection='cyl',llcrnrlat=20, urcrnrlat=70, llcrnrlon=-179,
+               urcrnrlon=-20, resolution='c')
 
 
     if lons == None or lats == None:
